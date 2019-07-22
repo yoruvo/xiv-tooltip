@@ -1,6 +1,13 @@
 document.addEventListener("DOMContentLoaded", function (event) {
   // Default settings.
   var settings = {
+    targetSelector: 'a.xiv-tooltip-link',
+    targetUrl: function (element) {
+      return element.hostname;
+    },
+    targetPath: function (element) {
+      return element.pathname + element.hash;
+    },
     locale: 'en',
   };
 
@@ -15,23 +22,20 @@ document.addEventListener("DOMContentLoaded", function (event) {
   cssLink.setAttribute('href', 'xiv-tooltip.css');
   document.getElementsByTagName('body')[0].appendChild(cssLink);
 
-  // Detect tooltip links.
-  var links = document.getElementsByClassName('xiv-tooltip-link');
-
-  // Main iteration loop.
-  for (var link of links) {
+  // Tooltip initiation function.
+  var initTooltip = function(element) {
     var site, type, locale, id;
     locale = settings.locale;
 
     var parts;
 
-    switch (link.hostname) {
+    switch (settings.targetUrl(element)) {
       case 'ffxivteamcraft.com':
         site = 'teamcraft';
         // Ensure the right Teamcraft URL.
-        parts = link.pathname.split('/');
+        parts = settings.targetPath(element).split('/');
         if (!parts.length || parts[1] !== 'db') {
-          continue;
+          exit;
         }
         locale = parts[2];
         type = parts[3];
@@ -40,11 +44,10 @@ document.addEventListener("DOMContentLoaded", function (event) {
 
       case 'garlandtools.org':
         site = 'garlandtools';
-        var fullpath = link.pathname + link.hash;
         // Ensure the right Garland Tools URL.
-        parts = fullpath.split('/');
+        parts = settings.targetPath(element).split('/');
         if (!parts.length || parts[1] !== 'db') {
-          continue;
+          exit;
         }
         type = parts[2].substr(1);
         id = parts[3];
@@ -62,12 +65,47 @@ document.addEventListener("DOMContentLoaded", function (event) {
           return response.json();
         })
         .then(function (result) {
-          if (link.classList.contains('has-icon')) {
+          if (element.classList.contains('has-icon')) {
             var icon = document.createElement('img');
             icon.setAttribute('src', `https://xivapi.com${result['Icon']}`)
-            link.prepend(icon);
+            element.prepend(icon);
           }
           console.debug(result[`Name_${locale}`], result[`Description_${locale}`]);
         });
   }
+
+  var obs = function(mutationsList, observer) {
+    for (var mutation of mutationsList) {
+      for (node of mutation.addedNodes) {
+        if (node.matches(settings.targetSelector)) {
+          initTooltip(node);
+        }
+      }
+    }
+  };
+
+  // Detect tooltip links.
+  var links = document.querySelectorAll(settings.targetSelector);
+  console.debug(links);
+
+  // Main iteration loop.
+  for (var link of links) {
+    initTooltip(link);
+  }
+
+// Create an observer instance linked to the callback function
+  var observer = new MutationObserver(obs);
+
+// Start observing the target node for configured mutations
+  observer.observe(document.getElementsByTagName('body')[0], {
+    childList: true,
+    subtree: true,
+  });
+
+  // Test observer.
+  var newLink = document.createElement('a');
+  newLink.setAttribute('href', "https://ffxivteamcraft.com/db/en/action/100063/Careful-Synthesis");
+  newLink.setAttribute('class', 'xiv-tooltip-link has-icon');
+  newLink.innerText = 'Careful Synthesis (added with javascript!)';
+  document.getElementsByTagName('body')[0].appendChild(newLink);
 });

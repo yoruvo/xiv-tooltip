@@ -1,8 +1,0 @@
-body {
-  background: pink;
-}
-
-.xiv-tooltip-link.has-icon[data-xiv-tooltip-icon]:before {
-  display: inline-block;
-  content: url(attr(data-xiv-tooltip-icon));
-}
