@@ -8,13 +8,18 @@ document.addEventListener("DOMContentLoaded", function (event) {
     targetPath: function (element) {
       return element.pathname + element.hash;
     },
+    iconSelector: '.has-icon',
+    apiDomain: 'https://xivapi.com',
     locale: 'en',
+    replaceText: false,
   };
 
   // Override with user settings, if available.
   if (typeof xivTooltipSettings !== 'undefined') {
     settings = Object.assign(settings, xivTooltipSettings);
   }
+
+  console.debug(settings);
 
   // Embed XIV Tooltip CSS.
   var cssLink = document.createElement('link');
@@ -23,9 +28,8 @@ document.addEventListener("DOMContentLoaded", function (event) {
   document.getElementsByTagName('body')[0].appendChild(cssLink);
 
   // Tooltip initiation function.
-  var initTooltip = function(element) {
-    var site, type, locale, id;
-    locale = settings.locale;
+  var getMetadata = function (element) {
+    var site, type, id;
 
     var parts;
 
@@ -37,7 +41,6 @@ document.addEventListener("DOMContentLoaded", function (event) {
         if (!parts.length || parts[1] !== 'db') {
           exit;
         }
-        locale = parts[2];
         type = parts[3];
         id = parts[4];
         break;
@@ -59,53 +62,120 @@ document.addEventListener("DOMContentLoaded", function (event) {
       type = 'CraftAction';
     }
 
+    return [site, type, id];
+  };
+
+  function initTooltip(element) {
+    var [site, type, id] = getMetadata(element);
     // We have identified the data. Let's fetch it!
-    fetch(`https://xivapi.com/${type}/${id}`)
+    var fetchUrl = new URL(`${settings.apiDomain}/${type}/${id}`);
+    var fetchParams = new URLSearchParams();
+    fetchParams.append('language', settings.locale);
+    fetchUrl.search = fetchParams.toString();
+
+    fetch(fetchUrl)
         .then(function (response) {
           return response.json();
         })
         .then(function (result) {
-          if (element.classList.contains('has-icon')) {
-            var icon = document.createElement('img');
-            icon.setAttribute('src', `https://xivapi.com${result['Icon']}`)
-            element.prepend(icon);
+          console.debug(result[`Name`], result[`Description`]);
+        });
+  };
+
+  async function requestLinkData(type, entries, ids) {
+    // Build the fetch request.
+    var fetchUrl = new URL(`${settings.apiDomain}/${type}`);
+    var fetchParams = new URLSearchParams();
+    fetchParams.append('language', settings.locale);
+    fetchParams.append('ids', ids.join(','));
+    fetchUrl.search = fetchParams.toString();
+
+    var response = await fetch(fetchUrl);
+    return response.json()
+        .then(function (result) {
+          if (result.Results.length && result.Results[0] !== false) {
+            for (var entry of entries) {
+              for (var resultRow of result.Results) {
+                if (entry.id == resultRow.ID) {
+                  if (settings.replaceText) {
+                    entry.element.innerText = resultRow.Name;
+                  }
+                  if (entry.element.matches(settings.iconSelector)) {
+                    console.debug('Does match icon selector');
+                    var icon = document.createElement('img');
+                    icon.setAttribute('class', 'xiv-tooltip-icon');
+                    icon.setAttribute('src', `https://xivapi.com${resultRow.Icon}`);
+                    entry.element.prepend(icon);
+                  }
+                  break;
+                }
+              }
+            }
           }
-          console.debug(result[`Name_${locale}`], result[`Description_${locale}`]);
         });
   }
 
-  var obs = function(mutationsList, observer) {
-    for (var mutation of mutationsList) {
-      for (node of mutation.addedNodes) {
-        if (node.matches(settings.targetSelector)) {
-          initTooltip(node);
+  function processLinks(elements) {
+    // data: keyed by type (item, action)
+    var data = {};
+
+    // Go through all the link elements!
+    for (element of elements) {
+      if (!element.matches(settings.iconSelector) && !settings.replaceText) {
+        continue;
+      }
+      // Grab the metadata from the link URL.
+      var [site, type, id] = getMetadata(element);
+      // Initiate the type's array.
+      if (typeof data[type] === 'undefined') {
+        data[type] = [];
+      }
+      // Add an entry to that type.
+      data[type].push({
+        id: id,
+        element: element,
+      });
+    }
+    // Let's do a fetch request per type!
+    for (var type in data) {
+      var entries = data[type];
+
+      if (!entries.length) {
+        continue;
+      }
+
+      // Collect the entry IDs for the API request.
+      var ids = [];
+      for (var entry of entries) {
+        if (ids.indexOf(entry.id) === -1) {
+          ids.push(entry.id);
         }
       }
+
+      requestLinkData(type, entries, ids);
     }
   };
 
-  // Detect tooltip links.
-  var links = document.querySelectorAll(settings.targetSelector);
-  console.debug(links);
+  // Observe the document for new links.
+  var obs = function (mutationsList, observer) {
+    var nodes = [];
+    for (var mutation of mutationsList) {
+      for (node of mutation.addedNodes) {
+        if (node instanceof HTMLElement && node.matches(settings.targetSelector)) {
+          nodes.push(node);
+        }
+      }
+    }
+    processLinks(nodes);
+  };
 
-  // Main iteration loop.
-  for (var link of links) {
-    initTooltip(link);
-  }
-
-// Create an observer instance linked to the callback function
   var observer = new MutationObserver(obs);
-
-// Start observing the target node for configured mutations
   observer.observe(document.getElementsByTagName('body')[0], {
     childList: true,
-    subtree: true,
+    subtree: true
   });
 
-  // Test observer.
-  var newLink = document.createElement('a');
-  newLink.setAttribute('href', "https://ffxivteamcraft.com/db/en/action/100063/Careful-Synthesis");
-  newLink.setAttribute('class', 'xiv-tooltip-link has-icon');
-  newLink.innerText = 'Careful Synthesis (added with javascript!)';
-  document.getElementsByTagName('body')[0].appendChild(newLink);
+  // Detect tooltip links.
+  var links = document.querySelectorAll(settings.targetSelector);
+  processLinks(links);
 });
